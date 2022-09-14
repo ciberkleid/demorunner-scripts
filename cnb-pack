@@ -1,0 +1,77 @@
+#_ECHO_OFF
+
+export DEMO_NAME="cnb-pack"
+
+echo "DEMO_NAME=${DEMO_NAME}"
+# Set DEMO_HOME in your shell profile script (e.g. add "export DEMO_HOME=~/workspace/demorunner-scripts" to ~/.zprofile or ~/.bash_profile)
+echo "DEMO_HOME=${DEMO_HOME}"
+export DEMO_TEMP="${DEMO_HOME}/tmp/${DEMO_NAME}"
+echo "DEMO_TEMP=${DEMO_TEMP}"
+tabset --title ${DEMO_NAME}
+rm -rf mkdir -p ${DEMO_TEMP}
+mkdir -p ${DEMO_TEMP}
+cd ${DEMO_TEMP}
+
+if [ ! -d hello-go-app ]; then git clone https://github.com/ciberkleid/hello-go.git hello-go-app; fi
+if [ ! -d hello-java-app ]; then git clone https://github.com/ciberkleid/hello-java.git hello-java-app; fi
+if [ ! -d buildpack-samples ]; then git clone https://github.com/buildpacks/samples.git buildpack-samples; fi
+
+pack config default-builder paketobuildpacks/builder:base
+pack config pull-policy if-not-present
+
+docker pull paketobuildpacks/builder:base
+docker pull paketobuildpacks/run:base-cnb
+
+export BAT_THEME=OneHalfDark
+
+cd hello-java-app
+pack build hello-java-img
+#./mvnw dependency:go-offline
+
+clear
+#_ECHO_ON
+
+#_ECHO_# Buildpacks 101
+
+#_ECHO_# Dockerfile: docker build . -t my-img -f Dockerfile
+bat Dockerfile
+
+#_ECHO_# Buildpacks (platform + base images + lifecycle + buildpacks)
+
+pack build hello-java-img --builder paketobuildpacks/builder:base
+
+docker images | grep -E "(hello|paketo)"
+
+clear
+#_ECHO_# Transparency (SBOM, inspections, layers)
+
+#_ECHO_# Software Bill of Materials
+pack sbom download hello-java-img
+tree layers
+cat layers/sbom/launch/paketo-buildpacks_bellsoft-liberica/jre/sbom.syft.json | jq
+cat layers/sbom/launch/paketo-buildpacks_executable-jar/sbom.syft.json | jq
+
+#_ECHO_# Image and Builder Inspection
+pack inspect hello-java-img
+pack inspect-builder
+
+#_ECHO_# Image Layers
+dive hello-java-img
+
+clear
+#_ECHO_# OS Patching
+docker pull paketobuildpacks/run:1.2.17-base-cnb
+docker tag paketobuildpacks/run:1.2.17-base-cnb paketobuildpacks/run:base-cnb
+docker images | grep -E "(hello|paketo)"
+pack rebase hello-java-img
+
+clear
+#_ECHO_# Custom Buildpacks
+ls ../buildpack-samples/buildpacks/hello-world/bin
+pack build hello-java-img --buildpack from=builder --buildpack ../buildpack-samples/buildpacks/hello-world
+
+clear
+#_ECHO_# Spring Boot
+./mvnw spring-boot:build-image -DskipTests
+
+#_ECHO_# Questions?
