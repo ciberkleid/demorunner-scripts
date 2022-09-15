@@ -40,55 +40,50 @@ echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
 kp config default-repository index.docker.io/$DOCKER_USERNAME/builder
 kp config default-service-account default --service-account-namespace kpack-builds
 
-echo -e "- group:\n  - id: paketo-buildpacks/go\n- group:\n  - id: paketo-buildpacks/java" > kpack-builder-order.yaml
-
 kp secret create regcred --dockerhub $DOCKER_USERNAME
+
+echo -e "- group:\n  - id: paketo-buildpacks/go\n- group:\n  - id: paketo-buildpacks/java" > kpack-builder-order.yaml
+kp clusterstack save base --build-image paketobuildpacks/build:base-cnb --run-image paketobuildpacks/run:base-cnb
+kp clusterstore save default -b gcr.io/paketo-buildpacks/java -b gcr.io/paketo-buildpacks/go
+#cat kpack-builder-order.yaml
+kp builder save builder --tag $DOCKER_USERNAME/builder --stack base --store default --order kpack-builder-order.yaml
+
+kp image create frontend_app --tag $DOCKER_USERNAME/frontend_app --builder builder --git https://github.com/ciberkleid/hello-go.git --git-revision 03ce0a044a036a74b40f0afcfaa0590cb10edecd
+kp image create inventory_app --tag $DOCKER_USERNAME/inventory_app --builder builder --git https://github.com/ciberkleid/hello-go.git --git-revision 6d815e9fa503a83b69b0145084292eb383d1f0d1
+
+##_ECHO_# kpack building blocks
+#kubectl api-resources --api-group kpack.io
 
 clear
 #_ECHO_ON
 #_ECHO_# Buildpacks on Kubernetes
-#_ECHO_# kpack building blocks
-kubectl api-resources --api-group kpack.io
 
 #_ECHO_# Ops perspective: create builder (stack + buildpacks store)
-kp clusterstack save base --build-image paketobuildpacks/build:base-cnb --run-image paketobuildpacks/run:base-cnb
-kp clusterstore save default -b gcr.io/paketo-buildpacks/java -b gcr.io/paketo-buildpacks/go
-cat kpack-builder-order.yaml
-kp builder save builder --tag $DOCKER_USERNAME/builder --stack base --store default --order kpack-builder-order.yaml
 kubectl get builders
 
 clear
 #_ECHO_# Dev perspective: create images
-kp image create chicken --tag $DOCKER_USERNAME/chicken --builder builder --git https://github.com/ciberkleid/hello-go.git --git-revision 6d815e9fa503a83b69b0145084292eb383d1f0d1
-#_ECHO_OFF
-DEMO_DELAY_OLD=$DEMO_DELAY
-export DEMO_DELAY=30
-#_ECHO_ON
-kp image create egg --tag $DOCKER_USERNAME/egg --builder builder --git https://github.com/ciberkleid/hello-go.git --git-revision 84b91fef7dbbab733ec8f218567538c73ad45a78
-kp image create waffles --tag $DOCKER_USERNAME/waffles --builder builder --git https://github.com/ciberkleid/hello-go.git --git-revision 03ce0a044a036a74b40f0afcfaa0590cb10edecd
-#_ECHO_OFF
-export DEMO_DELAY=$DEMO_DELAY_OLD
-#_ECHO_ON
+kp image create orders_app --tag $DOCKER_USERNAME/orders_app --builder builder --git https://github.com/ciberkleid/hello-go.git --git-revision 84b91fef7dbbab733ec8f218567538c73ad45a78
 
 kp image list
 kp build list
-kubectl get pods
-kp build logs chicken
-kp image list
+#kubectl get pods
+kp build logs inventory_app
+#kp image list
 
 clear
 #_ECHO_# Rebuild on new commit
-kp image patch chicken --wait --git-revision 22d2f95b71896f961bb712a259ebec8ea7ae8f3d
+kp image patch inventory_app --wait --git-revision 22d2f95b71896f961bb712a259ebec8ea7ae8f3d
 kp build list
 
 clear
 #_ECHO_# Rebase on OS change
 kp clusterstack save base --build-image paketobuildpacks/build:1.2.17-base-cnb --run-image paketobuildpacks/run:1.2.17-base-cnb
 kp build list
-kp build logs chicken -b 3
+kp build logs inventory_app -b 3
 
 ##_ECHO_# Declarative
 #kp clusterstore save default -b gcr.io/paketo-buildpacks/java -b gcr.io/paketo-buildpacks/go --output yaml > default-store.yaml
-#kubectl get image chicken -o yaml > chicken.yaml
+#kubectl get image inventory_app -o yaml > inventory_app.yaml
 
 #_ECHO_# Questions?
