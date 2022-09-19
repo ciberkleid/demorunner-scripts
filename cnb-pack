@@ -46,12 +46,12 @@ clear
 #_ECHO_# Transparency (SBOM, inspections, layers)
 
 #_ECHO_# Software Bill of Materials
-pack sbom download hello-java-img
-tree layers
+pack sbom download hello-java-img; tree layers
 cat layers/sbom/launch/paketo-buildpacks_bellsoft-liberica/jre/sbom.syft.json | jq
 cat layers/sbom/launch/paketo-buildpacks_executable-jar/sbom.syft.json | jq
 
-#_ECHO_# Image and Builder Inspection
+##_ECHO_# Image and Builder Inspection
+#_ECHO_# Image Inspection
 pack inspect hello-java-img
 #pack inspect-builder
 
