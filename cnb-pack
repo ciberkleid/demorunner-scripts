@@ -8,7 +8,7 @@ echo "DEMO_HOME=${DEMO_HOME}"
 export DEMO_TEMP="${DEMO_HOME}/tmp/${DEMO_NAME}"
 echo "DEMO_TEMP=${DEMO_TEMP}"
 tabset --title ${DEMO_NAME}
-rm -rf mkdir -p ${DEMO_TEMP}
+rm -rf ${DEMO_TEMP}
 mkdir -p ${DEMO_TEMP}
 cd ${DEMO_TEMP}
 

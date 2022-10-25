@@ -17,7 +17,7 @@ echo "Setting DOCKER_USERNAME and DOCKER_PASSWORD..."
 if [ -z $DOCKER_PASSWORD ]; then export DOCKER_USERNAME=$(op read op://Work/DockerHubEnterprise/Section_iwtibsn7dbihotun2tcxcikewy/username); export DOCKER_PASSWORD=$(op read op://Work/DockerHubEnterprise/Section_iwtibsn7dbihotun2tcxcikewy/access-token); fi
 
 # Disable fzf interactive for kubectx and kubens (alternatively, can use: "kubectx | cat")
-KUBECTX_IGNORE_FZF=1
+export KUBECTX_IGNORE_FZF=1
 
 kubectx docker-desktop
 
