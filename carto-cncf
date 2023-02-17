@@ -1,0 +1,202 @@
+#_ECHO_OFF
+
+# TO RUN:
+# cd $DEMO_HOME; RECREATE_CLUSTER=1 demorunner carto-cncf 1
+
+export DEMO_NAME="carto-cncf"
+
+echo "DEMO_NAME=${DEMO_NAME}"
+# Set DEMO_HOME in your shell profile script (e.g. add "export DEMO_HOME=~/workspace/demorunner-scripts" to ~/.zprofile or ~/.bash_profile)
+echo "DEMO_HOME=${DEMO_HOME}"
+export DEMO_TEMP="${DEMO_HOME}/tmp/${DEMO_NAME}"
+echo "DEMO_TEMP=${DEMO_TEMP}"
+tabset --title ${DEMO_NAME}
+rm -rf mkdir -p ${DEMO_TEMP}
+mkdir -p ${DEMO_TEMP}
+cd ${DEMO_TEMP}
+
+export RECREATE_CLUSTER=${RECREATE_CLUSTER:-0}
+
+KIND_IMAGE=${KIND_IMAGE:-kindest/node:v1.21.1}
+FLUX2_VERSION=0.27.4
+#TEKTON_VERSION= (latest)
+TEKTON_GIT_CLI__TASK_VERSION=0.2
+KPACK_VERSION=0.5.1
+#KAPP_CONTROLLER_VERSION= (latest)
+KNATIVE_SERVING_VERSION=1.2.0
+CERT_MANAGER_VERSION=1.7.1
+#SECRETGEN_CONTROLLER_VERSION= (not installed)
+CARTOGRAPHER_VERSION=0.2.2
+GIT_SERVE_VERSION=0.0.5
+
+alias k=kubectl
+alias ktx=kubectx
+alias kns=kubens
+
+# Clone Cartographer-concepts repo
+# Always refresh to overwrite manual replacement of ${NEW_SOURCE} that is done during the demo
+rm -rf ${DEMO_TEMP}/cartographer-concepts
+git clone git@github.com:ciberkleid/cartographer-concepts.git ${DEMO_TEMP}/cartographer-concepts
+ln -sf ${DEMO_TEMP}/cartographer-concepts/layout-2 intro
+
+# Clone Cartographer repo with examples
+#if [ ! -d ${DEMO_TEMP}/cartographer ]; then git clone git@github.com:vmware-tanzu/cartographer.git ${DEMO_TEMP}/cartographer; fi
+if [ ! -d ${DEMO_TEMP}/cartographer ]; then git clone git@github.com:ciberkleid/cartographer.git ${DEMO_TEMP}/cartographer; fi
+ln -sf ${DEMO_TEMP}/cartographer/examples examples
+
+# Create cluster
+if [ $RECREATE_CLUSTER -gt 0 ]; then kind delete cluster; kind create cluster --image ${KIND_IMAGE}; kubectx kind-kind; kapp deploy --yes -a fluxcd -f https://github.com/fluxcd/flux2/releases/download/v${FLUX2_VERSION}/install.yaml; kapp deploy --yes -a tekton -f https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml; kapp deploy --yes -a tekton-git-cli -f https://raw.githubusercontent.com/tektoncd/catalog/main/task/git-cli/${TEKTON_GIT_CLI__TASK_VERSION}/git-cli.yaml; kapp deploy --yes -a kpack -f https://github.com/pivotal/kpack/releases/download/v${KPACK_VERSION}/release-0.5.1.yaml; kapp deploy --yes -a kapp-controller -f https://github.com/vmware-tanzu/carvel-kapp-controller/releases/latest/download/release.yml; kapp deploy --yes -a knative-serving -f https://github.com/knative/serving/releases/download/knative-v${KNATIVE_SERVING_VERSION}/serving-crds.yaml -f https://github.com/knative/serving/releases/download/knative-v${KNATIVE_SERVING_VERSION}/serving-core.yaml; kapp deploy --yes -a cert-manager -f https://github.com/jetstack/cert-manager/releases/download/v$CERT_MANAGER_VERSION/cert-manager.yaml; kapp deploy --yes -a cartographer -f https://github.com/vmware-tanzu/cartographer/releases/download/v${CARTOGRAPHER_VERSION}/cartographer.yaml; kapp deploy --yes -a git-serve -f https://github.com/cirocosta/git-serve/releases/latest/download/git-serve.yaml; kubectl apply -f ${DEMO_TEMP}/cartographer/hack/git-server.yaml; fi
+
+# Clean up cluster
+if [ ! $RECREATE_CLUSTER -gt 0 ]; then kubectx kind-kind; kubectl delete gitrepository hello-world; kubectl delete cnbimage hello-world; kapp delete --yes -a example; kapp delete --yes -a example-sc; kapp delete --yes -a example-del; kapp delete --yes -a gitops-ctrl; kubectl delete -f ${DEMO_TEMP}/cartographer/hack/git-server.yaml; kubectl apply -f ${DEMO_TEMP}/cartographer/hack/git-server.yaml; fi
+
+# Create demo-values.yaml file
+VALUES_FILE=${DEMO_TEMP}/demo-values.yaml
+echo "#@data/values" > ${VALUES_FILE}
+echo "---" >> ${VALUES_FILE}
+yq -i '.service_account_name = "cartographer-example-basic-sc-sa"' ${VALUES_FILE}
+#yq -i '.ops_service_account_name = "cartographer-example-basic-delivery-sa"' ${VALUES_FILE}   ## https://github.com/vmware-tanzu/cartographer/issues/674 still open incorporated so this is not used in new clones
+yq -i '.image_prefix = "gcr.io/fe-ciberkleid/carto-demo/"' ${VALUES_FILE}
+yq -i '.workload_name = "hello-cncf"' ${VALUES_FILE}
+yq -i '.source_repo.url = "https://github.com/ciberkleid/hello-go"' ${VALUES_FILE}
+yq -i '.source_repo.branch = "main"' ${VALUES_FILE}
+# Git Ops repo config
+### REMOVING GITHUB WITH SSH SETUP BECAUSE EXAMPLES SWITCHED FROM GITEA (SSH) TO GIT-SERV (USERNAME/PASSWORD):
+### https://github.com/vmware-tanzu/cartographer/commit/f1990a86b6be597adc1589fa46398764ba3f3705#diff-a771167e350c57e832261d5244bc43eba6538ffb57cd7a36e5c81a491cab39bd
+GITOPS_REPO="http://git-server.default.svc.cluster.local:80/gitops-test.git"
+GITOPS_BRANCH="main"
+GITOPS_COMMIT_MESSAGE="Update config"
+pathEnv=".git_repository"  valueEnv=$( echo ${GITOPS_REPO} ) yq -i 'eval(strenv(pathEnv)) |= strenv(valueEnv)' ${VALUES_FILE}
+pathEnv=".git_branch"  valueEnv=$( echo ${GITOPS_BRANCH} ) yq -i 'eval(strenv(pathEnv)) |= strenv(valueEnv)' ${VALUES_FILE}
+pathEnv=".git_commit_message"  valueEnv=$( echo ${GITOPS_COMMIT_MESSAGE} ) yq -i 'eval(strenv(pathEnv)) |= strenv(valueEnv)' ${VALUES_FILE}
+yq -i '.git_user_name = "gitops-user"' ${VALUES_FILE}
+yq -i '.git_user_email = "gitops-user@example.com"' ${VALUES_FILE}
+pathEnv=".git_writer.repository"  valueEnv=$( echo ${GITOPS_REPO} ) yq -i 'eval(strenv(pathEnv)) |= strenv(valueEnv)' ${VALUES_FILE}
+pathEnv=".git_writer.branch"  valueEnv=$( echo ${GITOPS_BRANCH} ) yq -i 'eval(strenv(pathEnv)) |= strenv(valueEnv)' ${VALUES_FILE}
+# Container registry creds
+yq -i '.registry.server = "gcr.io"' ${VALUES_FILE}
+yq -i '.registry.username = "_json_key"' ${VALUES_FILE}
+pathEnv=".registry.password"  valueEnv=$( cat ~/.secrets/gcp-service-account.json ) yq -i 'eval(strenv(pathEnv)) |= strenv(valueEnv)' ${VALUES_FILE}
+
+# Create shared resources (templates, builder, service accounts...)
+kapp deploy --yes -a example-shared -f <(ytt --ignore-unknown-comments -f ${DEMO_TEMP}/examples/shared/ -f ${VALUES_FILE})
+
+clear
+#_ECHO_ON
+#open https://github.com/vmware-tanzu/cartographer/blob/main/examples/README.md
+#kapp list
+#tree examples -L 1
+#clear
+
+#open https://github.com/vmware-tanzu/cartographer/blob/main/examples/basic-sc/README.md
+
+##_ECHO_# BASIC WORKFLOW: source -> image -> running app
+##_ECHO_# IMPLEMENTATION:     flux -> kpack -> knative-serving
+#_ECHO_# BASIC WORKFLOW: source (flux) -> image (kpack) -> running app (knative-serving)
+cd intro
+#_ECHO_# Manual approach (without Cartographer)
+yq 01_manual/source.yaml 01_manual/image.yaml 01_manual/app-deploy.yaml
+kubectl apply -f 01_manual/source.yaml
+#kubectl get gitrepository hello-world
+kubectl get gitrepository hello-world -o yaml | yq .status
+# kubectl get gitrepository hello-world -o yaml | yq '.status.conditions.[] | select(.type == "Ready")'
+# kubectl get gitrepository hello-world -o yaml | yq '.status.conditions.[] | select(.type == "Ready") | .status'
+kubectl get gitrepository hello-world -o yaml | yq .status.artifact.url | tee >(pbcopy)
+
+vi 01_manual/image.yaml
+kubectl apply -f 01_manual/image.yaml
+#_ECHO_OFF
+# Alternative to editing through vi:
+export NEW_SOURCE=$(kubectl get gitrepository hello-world -o yaml | yq .status.artifact.url)
+# yq '.spec.source.blob.url |= envsubst' 01_manual/image.yaml | kubectl apply -f -
+#_ECHO_ON
+kubectl get imgs hello-world
+#kubectl get imgs hello-world -o yaml | yq
+kp build logs hello-world
+kubectl get imgs hello-world -o yaml | yq .status
+#kubectl get imgs hello-world -o yaml | yq .status.latestImage
+
+export NEW_IMAGE=$(kubectl get imgs hello-world -o yaml | yq .status.latestImage)
+yq '.spec.template.spec.containers[0].image |= envsubst' 01_manual/app-deploy.yaml
+#_ECHO_# Then... `kubectl apply` or `git push`? Both are valid use cases.
+
+clear
+#_ECHO_# Cartographer: automation through choreography
+kubectl api-resources --output name | grep carto | grep template
+
+yq 02_templated/source.yaml 02_templated/image.yaml
+
+yq 03_supply-chain.yaml
+
+clear
+#_ECHO_# Cartographer: reusability through parameterization
+yq 04_workload.yaml
+#yq 05_parameterized/source.yaml 05_parameterized/image.yaml 05_parameterized/app-deploy.yaml
+yq 05_parameterized/source.yaml 05_parameterized/image.yaml
+
+clear
+#_ECHO_# GitOps Example: Supply Chain
+open https://github.com/vmware-tanzu/cartographer/blob/main/examples/README.md
+cd ../examples/gitwriter-sc
+#_ECHO_# SUPPLY CHAIN: source (flux) -> image (kpack) -> config (configmap) -> git (tekton)
+# #_ECHO_# SUPPLY CHAIN: source -> image -> configuration -> git
+# #_ECHO_# IMPLEMENTATION:         flux -> kpack -> configmap -> tekton
+# #_ECHO_# Supply chain saves ops yaml to ConfigMap then writes to git
+
+kapp deploy --yes -a example-sc -f <(ytt --ignore-unknown-comments -f ./app-operator -f ./developer -f ${VALUES_FILE})
+
+yq app-operator/supply-chain.yaml
+
+#_ECHO_# ClusterConfigTemplate for providing configuration in-cluster
+yq app-operator/config-service.yaml
+#_ECHO_# Templates for using Tekton to push to git
+tree app-operator | grep git
+
+#_ECHO_# Developer Perspective: same SC selector => same workload!
+#yq developer/workload.yaml
+
+# kapp deploy --yes -a example-sc -f <(ytt --ignore-unknown-comments -f ./app-operator -f ./developer -f ${VALUES_FILE})
+kubectl wait --for=condition=Ready workload/hello-cncf --timeout=2m
+kubectl tree workload hello-cncf     # Also useful: octant UI
+#kp build logs hello-cncf
+#kubectl get configmap hello-cncf -o yaml
+#kubectl get configmap hello-cncf -o yaml | yq '.data.manifest | @base64d' | yq -P
+#_ECHO_OFF
+pkill kubectl
+(kubectl port-forward service/git-server 9090:80 &) > /dev/null
+rm -rf gitops-test
+#_ECHO_ON
+git clone http://localhost:9090/gitops-test.git && cd gitops-test && git checkout main
+tree
+yq -P '.' config/manifest.yaml
+
+# cd ..; pkill kubectl; kapp delete --yes -a example-sc
+
+clear
+#_ECHO_# GitOps Example: Delivery
+#cd ../basic-delivery
+cd ../../basic-delivery
+#_ECHO_# DELIVERY: ops-source (flux) -> running app (knative-serving)
+# #_ECHO_# BASIC DELIVERY: ops-source -> running app
+# #_ECHO_# IMPLEMENTATION: flux     -> knative-serving
+# #_ECHO_# Different "blueprint": Delivery instead of Supply Chain
+yq app-operator/delivery.yaml
+yq app-operator/deploy-app.yaml
+
+#_ECHO_# Deliverable (counterpart to Workload)
+#yq app-operator/deliverable.yaml
+ytt --ignore-unknown-comments -f app-operator/deliverable.yaml -f ${VALUES_FILE} | yq
+
+kapp deploy --yes -a example-del -f <(ytt --ignore-unknown-comments -f ./app-operator -f ${VALUES_FILE})
+
+kubectl tree deliverable gitops
+#kapp list | grep ctrl; kapp inspect -a gitops-ctrl
+#kubectl get all
+kubectl get deployment --selector serving.knative.dev/service=hello-cncf
+(kubectl port-forward deployment/hello-cncf-00001-deployment 8080:8080 &) > /dev/null
+curl localhost:8080
+
+#_ECHO_# Questions?
+
+pkill kubectl; kapp delete --yes -a example-del; kapp delete --yes -a example-sc
+k delete cnbimage hello-world; k delete gitrepository hello-world

@@ -1,0 +1,147 @@
+#_ECHO_OFF
+
+# TO RUN:
+#cd ~/workspace/presentations/path-to-prod-demo/cartographer; RECREATE_CLUSTER=0 source demorunner.sh run/demo-meetup.sh
+#cd ~/workspace/presentations/path-to-prod-demo/cartographer; RECREATE_CLUSTER=1 source demorunner.sh run/demo-meetup.sh
+
+export DEMO_HOME=${PWD}
+export DEMO_RUN=${DEMO_HOME}/run
+export DEMO_TEMP=${DEMO_HOME}/temp
+#rm -rf ${DEMO_TEMP}
+mkdir -p ${DEMO_TEMP}
+cd ${DEMO_TEMP}
+
+alias k=kubectl
+alias ktx=kubectx
+alias kns=kubens
+
+export REGISTRY_USERNAME=usuario01
+export REGISTRY_PASSWORD=Usuario01
+export REGISTRY_URL=https://harbor.tanzu.coraiberkleid.site
+export IMAGE_PREFIX=harbor.tanzu.coraiberkleid.site/tanzu-hispano/
+export KP_USERNAME=$REGISTRY_USERNAME
+export KP_PASSWORD=$REGISTRY_PASSWORD
+export KP_REPO=${IMAGE_PREFIX}kp
+
+# Clone Cartographer-concepts repo
+# Always refresh to overwrite manual replacement of ${NEW_SOURCE} that is done during the demo
+unlink intro
+rm -rf ${DEMO_TEMP}/cartographer-concepts
+git clone git@github.com:ciberkleid/cartographer-concepts.git ${DEMO_TEMP}/cartographer-concepts
+find ${DEMO_TEMP}/cartographer-concepts -type f -not -path '*/\.*' -print0 | xargs -0 sed -i '' 's/carto-demo/tanzu-hispano/g'
+ln -sf ${DEMO_TEMP}/cartographer-concepts/layout-2 intro
+
+# Clone SpringOne Tour 2022 workshop repo
+if [ ! -d ${DEMO_TEMP}/workshop ]; then git clone git@github.com:cdcollab/springone-tour-tce-workshop.git ${DEMO_TEMP}/workshop; fi
+
+# This demo assumes pre-requisites and dependencies are installed. See:
+#    - ${DEMO_TEMP}/workshop/README.md
+#    - ${DEMO_TEMP}/workshop/download-dependencies.sh
+
+# Cleanup
+#curl -X DELETE --header 'Accept: text/plain' '$REGISTRY_URL/api/repositories/tanzu-hispano/hello-amigos' -i -k -u $REGISTRY_USERNAME:$REGISTRY_PASSWORD
+if [ $RECREATE_CLUSTER -gt 0 ]; then tanzu unmanaged-cluster delete tanzu-hispano; ktx -d kind-tanzu-hispano; fi
+#if [ $RECREATE_CLUSTER -gt 0 ]; then dclean; fi
+if [ ! $RECREATE_CLUSTER -gt 0 ]; then tanzu apps workload delete --yes hello-amigos; kapp delete --yes -a example-sc; kapp delete --yes -a example-rbac; kubectl delete -f ${DEMO_TEMP}/intro/01_manual/image.yaml; kubectl delete -f ${DEMO_TEMP}/intro/01_manual/source.yaml; fi
+
+# Optimize speed
+docker pull projects.registry.vmware.com/tce/kind:v1.22.4
+docker pull paketobuildpacks/build:base-cnb
+docker pull paketobuildpacks/run:base-cnb
+docker pull gcr.io/paketo-buildpacks/java
+docker pull gcr.io/paketo-buildpacks/go
+
+if [[ $(tanzu uc list | grep tanzu-hispano) == "" ]]; then tanzu unmanaged-cluster create tanzu-hispano -p 80:80 -p 443:443; fi
+
+# Make sure all pods are running
+totalPods=$(kubectl get pods -A --no-headers | wc -l | tr -d ' ')
+runningPods=$(kubectl get pods -A --no-headers | grep -E '(Running|Completed)' | wc -l | tr -d ' ')
+while [[ $runningPods < $totalPods ]] ; do echo "$runningPods out of $totalPods pods are running"; echo "Waiting 5 seconds to check status" && sleep 5; totalPods=$(kubectl get pods -A --no-headers | wc -l | tr -d ' '); runningPods=$(kubectl get pods -A --no-headers | grep -E '(Running|Completed)' | wc -l | tr -d ' '); done
+echo "All pods are running (count=$totalPods)"
+
+# Install App Toolkit
+cd ${DEMO_TEMP}/workshop
+envsubst < values-install-template.yaml > values-install.yaml
+tanzu package install app-toolkit --package-name app-toolkit.community.tanzu.vmware.com --version 0.1.0 -f values-install.yaml -n tanzu-package-repo-global
+
+# Make sure all packages are reconciled
+totalPackages=$(tanzu package installed list -A -o yaml | grep "status:" | wc -l | tr -d ' ')
+reconciledPackages=$(tanzu package installed list -A -o yaml | grep "status: Reconcile succeeded" | wc -l | tr -d ' ')
+while [[ $reconciledPackages < $totalPackages ]] ; do echo "$reconciledPackages out of $totalPackages packages are reconciled"; echo "Waiting 5 seconds to check status" && sleep 5; totalPackages=$(tanzu package installed list -A -o yaml | grep "status:" | wc -l | tr -d ' '); reconciledPackages=$(tanzu package installed list -A -o yaml | grep "status: Reconcile succeeded" | wc -l | tr -d ' '); done
+echo "All packages are reconciled (count=$totalPackages)"
+
+# Configure kpack
+echo $KP_PASSWORD | docker login -u ${KP_USERNAME} --password-stdin https://harbor.tanzu.coraiberkleid.site
+kp clusterstack save base --build-image paketobuildpacks/build:base-cnb --run-image paketobuildpacks/run:base-cnb
+kp clusterstore save default -b gcr.io/paketo-buildpacks/java -b gcr.io/paketo-buildpacks/go
+kp clusterbuilder save builder --tag ${IMAGE_PREFIX}builder --stack base --store default --order example/kpack-builder-order.yaml
+
+# Install sample supply chain
+envsubst < values-example-template.yaml > values-example.yaml
+kapp deploy --yes -a example-rbac -f <(ytt --ignore-unknown-comments -f example/cluster/ -f values-example.yaml)
+kapp deploy --yes -a example-sc -f <(ytt --ignore-unknown-comments -f example/app-operator/ -f values-example.yaml)
+
+cd ${DEMO_TEMP}/intro
+clear
+#_ECHO_ON
+ktx
+tanzu package installed list -A
+open https://tanzucommunityedition.io
+# Navigate to https://tanzucommunityedition.io/docs/v0.11/package-readme-app-toolkit-0.1.0
+
+#_ECHO_# Flujo de trabajo sencillo: código (fluxcd) --> imagen (kpack) --> ejecución (knative serving)
+
+#_ECHO_# Proceso manual (sin cartographer)
+yq 01_manual/source.yaml 01_manual/image.yaml 01_manual/app-deploy.yaml
+kubectl apply -f 01_manual/source.yaml
+#kubectl get gitrepository hello-world
+kubectl get gitrepository hello-world -o yaml | yq .status
+# kubectl get gitrepository hello-world -o yaml | yq '.status.conditions.[] | select(.type == "Ready")'
+# kubectl get gitrepository hello-world -o yaml | yq '.status.conditions.[] | select(.type == "Ready") | .status'
+kubectl get gitrepository hello-world -o yaml | yq .status.artifact.url | tee >(pbcopy)
+
+vi 01_manual/image.yaml
+kubectl apply -f 01_manual/image.yaml
+#_ECHO_OFF
+# Alternative to editing through vi:
+export NEW_SOURCE=$(kubectl get gitrepository hello-world -o yaml | yq .status.artifact.url)
+# yq '.spec.source.blob.url |= envsubst' 01_manual/image.yaml | kubectl apply -f -
+#_ECHO_ON
+kubectl get imgs hello-world
+#kubectl get imgs hello-world -o yaml | yq
+kp build logs hello-world
+kubectl get imgs hello-world -o yaml | yq .status
+#kubectl get imgs hello-world -o yaml | yq .status.latestImage
+
+export NEW_IMAGE=$(kubectl get imgs hello-world -o yaml | yq .status.latestImage)
+yq '.spec.template.spec.containers[0].image |= envsubst' 01_manual/app-deploy.yaml
+#_ECHO_# Luego... `kubectl apply` o `git push`? Ambas opciones son válidas.
+
+clear
+#_ECHO_# Coreografía automatizada: cadena de suministro de software (cartographer)
+
+#_ECHO_# Perspectiva de operaciones: plantillas parametrizadas (reutilizables)
+kubectl api-resources --output name | grep carto | grep template
+yq 02_templated/source.yaml 02_templated/image.yaml
+yq 03_supply-chain.yaml
+
+clear
+yq 04_workload.yaml
+#yq 05_parameterized/source.yaml 05_parameterized/image.yaml 05_parameterized/app-deploy.yaml
+yq 05_parameterized/source.yaml 05_parameterized/image.yaml
+
+kapp inspect -a example-rbac
+kapp inspect -a example-sc
+
+clear
+#_ECHO_# Perspectiva de desarrollo: crear el "Workload"
+cd ${DEMO_TEMP}/workshop
+tanzu apps workload create hello-amigos --type web --git-repo https://github.com/ciberkleid/hello-go.git --git-branch main --app hello-amigos --env "HELLO_MSG=amigos" --yes
+tanzu apps workload get hello-amigos        # Alt: kubectl get workload hello-amigos -o yaml | yq
+kp build logs hello-amigos        # Alt: tanzu apps workload tail hello-amigos
+kubectl tree workload hello-amigos
+kubectl get kservice hello-amigos
+#curl http://hello-amigos.default.127-0-0-1.sslip.io
+kubectl tree kservice hello-amigos
+
+#_ECHO_# Dudas? Preguntas?
