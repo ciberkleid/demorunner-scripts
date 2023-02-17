@@ -1,0 +1,12 @@
+apiVersion: kbld.k14s.io/v1alpha1
+kind: Config
+sources:
+  - image: app2
+    path: ./src-app2 # <-- where to find app2 source
+    pack:
+      build:
+        builder: paketobuildpacks/builder:tiny
+destinations:
+  - image: app2
+    newImage: docker.io/ciberkleid736/kbld-app2 # <-- where to push app2 image
+    tags: [cnb]

@@ -1,0 +1,129 @@
+#_ECHO_OFF
+
+export DEMO_NAME="carvel-kbld"
+
+echo "DEMO_NAME=${DEMO_NAME}"
+# Set DEMO_HOME in your shell profile script (e.g. add "export DEMO_HOME=~/workspace/demorunner-scripts" to ~/.zprofile or ~/.bash_profile)
+echo "DEMO_HOME=${DEMO_HOME}"
+export DEMO_TEMP="${DEMO_HOME}/tmp/${DEMO_NAME}"
+echo "DEMO_TEMP=${DEMO_TEMP}"
+tabset --title ${DEMO_NAME}
+rm -rf ${DEMO_TEMP}
+mkdir -p ${DEMO_TEMP}
+cp -R files/${DEMO_NAME}/* ${DEMO_TEMP}
+cd ${DEMO_TEMP}
+
+if [ ! -d ${DEMO_TEMP}/src-app1 ]; then git clone git@github.com:ciberkleid/hello-go.git ${DEMO_TEMP}/src-app1; fi
+if [ ! -d ${DEMO_TEMP}/src-app2 ]; then git clone git@github.com:ciberkleid/hello-go.git ${DEMO_TEMP}/src-app2; fi
+
+echo "Setting DOCKER_USERNAME and DOCKER_PASSWORD..."
+# op item get "DockerHubEnterprise" --format json
+if [ -z $DOCKER_PASSWORD ]; then export DOCKER_USERNAME=$(op read op://Work/DockerHubEnterprise/Section_iwtibsn7dbihotun2tcxcikewy/username); export DOCKER_PASSWORD=$(op read op://Work/DockerHubEnterprise/Section_iwtibsn7dbihotun2tcxcikewy/access-token); fi
+echo "DOCKER_USERNAME=${DOCKER_USERNAME}"
+
+pack config pull-policy if-not-present
+docker pull paketobuildpacks/builder:tiny
+docker pull paketobuildpacks/run:tiny-cnb
+
+clear
+#_ECHO_ON
+#which kbld
+open https://carvel.dev
+kbld --version
+#kbld --help
+clear
+
+ls k8s/
+bat k8s/app1.yaml
+kbld -f k8s/ --unresolved-inspect
+
+#_ECHO_# Example 1: Build app1 with Dockerfile (default)
+ls src-app1/
+bat kbld-build-app1.yaml
+kbld -f k8s/app1.yaml -f kbld-build-app1.yaml
+docker images | grep kbld-app1
+open https://hub.docker.com/repository/docker/ciberkleid736/kbld-app1
+
+clear
+#_ECHO_# Example 2: Build with pack (Buildpacks)
+bat kbld-build-app2.yaml -H 6:8
+kbld -f k8s/app2.yaml -f kbld-build-app2.yaml
+docker images | grep kbld-app2
+open https://hub.docker.com/repository/docker/ciberkleid736/kbld-app2
+
+#_ECHO_# Can also build with Docker buildx, ko, and Bazel. But... what are the benefits?
+
+clear
+#_ECHO_# Key benefits: Parallel builds & build "receipts" (aka lock files)
+kbld -f k8s/app2.yaml -f kbld-build-app2.yaml -f k8s/app1.yaml -f kbld-build-app1.yaml --lock-output k8s/apps.kbld.lock.yaml
+bat k8s/apps.kbld.lock.yaml   # Lock file is a "receipt" of the digests that were built
+#_ECHO_# This time, use the lock "receipt" to resolve the tags!
+kbld -f k8s/app2.yaml -f k8s/app1.yaml -f k8s/apps.kbld.lock.yaml
+# kbld -f k8s/app2.yaml -f kbld-build-app2.yaml -f k8s/app1.yaml -f kbld-build-app1.yaml -f k8s/apps.kbld.lock.yaml --build=false
+# IF ONLY ONE PRESRESOLVED IMAGE WAS IN THE LOCK FILE THEN --build=false would cause the command to DESIRABLY fail
+
+clear
+#_ECHO_# Example 3: Not your source code? You can still Resolve & Lock!
+bat k8s/nginx.yaml
+kbld -f k8s/nginx.yaml --platform linux/arm64/v8 --lock-output k8s/nginx.kbld.lock.yaml | bat -l YAML -H 5:16 -H 31
+bat k8s/nginx.kbld.lock.yaml
+kbld -f k8s/nginx.yaml -f k8s/nginx.kbld.lock.yaml | bat -l YAML -H 7:9
+
+clear
+#_ECHO_# Integrate it into your workflow!
+
+#_ECHO_# Pass input from any YAML wrangler
+#_ECHO_# <helm/kustomize/cnab/ytt...> | kbld -f -
+#find k8s/*.yaml | xargs -I{} sh -c "cat {}; echo ---" | kbld -f -
+#kustomize build | kbld -f - -f k8s/apps.kbld.lock.yaml -f k8s/nginx.kbld.lock.yaml
+
+#_ECHO_# Pass output directly to Kubernetes
+#kbld -f k8s/
+#_ECHO_# kbld -f k8s/ | kubectl apply -f -
+
+#_ECHO_# Questions?
+
+# Supports builders listed in docs; other extensions would be through PRs to project
+# Parallel builds (Config can list multiple builds and kbld orchestrates builds in parallel)
+# kpack? no integration between kbld and kpack; also must git clone first as kbld only builds from local path
+    # best for: so for a supply chain that works based on scripts in CI and for local iteration; easily add to a github action, for example
+    # if there's demand there could be a github action that invokes kbld
+    # carvel-setup-action github action enables downloading carvel easily
+# Many builders orient themselves around tags, which is risky. digetss are preferebale so AT THE TIME OF BUILD you want to grab the digest, and then propagate the digest to the next steps
+    # The lock file is a "receipt" of sorts
+# IDEAL SITUATION: generate a lock file DURING the build
+# SECOND SITUATION: If it' snot your image, generate the digests and lock file
+
+#If your build can produce a "receipt" with digests, good. If you can't, wrap your build with kbld so you can do it.
+#This implies you can use receipts ar deployment time. kbld can do this for two tools: for kbld, and for imgpkg.
+#The format of the receipt is open - nobody else is using it today but other tools could.
+
+
+#_ECHO_# Pipe output directly to kubernetes
+#_ECHO_# kbld -f k8s/nginx.yaml | kubectl apply -f -
+#_ECHO_# Pipe input from any other tool that emits YAML
+#_ECHO_# cat input.yaml | kbld -f - | kubectl apply -f -
+#_ECHO_# Replace "cat" ^^ with helm, kustomize, ytt...
+
+#Can also ingest YAML produced by CNB as input, including the CNAB equivalent of a lock file using flag "--image-map-file string"
+
+# imgpkg lock vs lock? carvel vs k14s API? why the diff? what is each for?
+    # k14s api retained for back compatability / limited refactoring & duplication... further refactoring may happen eventually
+    # carvel.dev domain used in newer stuff
+    # kbld originally relocated images to a different registry. now highly discouraged to use kbld for that (the functionality may still be there or hidden but don't publicize this). this merited being a new, separate tool (imgpkg - which now does ore than kbld ever did, e.g. bundles)
+#        but kbld still needs to produce a lock
+#        imgpkg also needs to lock files relevant to the bundle (has some more info)
+#        SO: we want the tools to work together well so decided kbld should understand and be able to generate the format for imgpkg, so kbld owns one format and supports the format for imgpkg as well.
+#        IN THEORY: can add additional receipt formats for other tools, other than its own andimgpkg, if demand is high enough
+
+# Default sha pulled is not on docker hub?? With --platform then it matches...
+    # Docker Hub does not show the digest for the image
+    # Certain images are image indices with multiple indices (can be recursive)
+    # To see, use, for example:
+    # docker manifest inspect index.docker.io/library/nginx@sha256:c54fb26749e49dc2df77c6155e8b5f0f78b781b7f0eadd96ecfabdcdfa5b1ec4
+
+
+#Lima could be one of the builders! Need a PR...
+#kbld without docker daemon or CLI: ko, Bazel
+#pack CLI and docker CLI must be installed for kbld
+

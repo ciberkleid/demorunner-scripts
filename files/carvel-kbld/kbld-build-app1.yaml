@@ -1,0 +1,9 @@
+apiVersion: kbld.k14s.io/v1alpha1
+kind: Config
+sources:
+  - image: app1
+    path: ./src-app1 # <-- where to find app1 source
+destinations:
+  - image: app1
+    newImage: docker.io/ciberkleid736/kbld-app1 # <-- where to push app1 image
+    tags: [dockerfile]

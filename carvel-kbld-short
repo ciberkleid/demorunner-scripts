@@ -1,0 +1,70 @@
+#_ECHO_OFF
+
+export DEMO_NAME="carvel-kbld-short"
+
+echo "DEMO_NAME=${DEMO_NAME}"
+# Set DEMO_HOME in your shell profile script (e.g. add "export DEMO_HOME=~/workspace/demorunner-scripts" to ~/.zprofile or ~/.bash_profile)
+echo "DEMO_HOME=${DEMO_HOME}"
+export DEMO_TEMP="${DEMO_HOME}/tmp/${DEMO_NAME}"
+echo "DEMO_TEMP=${DEMO_TEMP}"
+tabset --title ${DEMO_NAME}
+rm -rf ${DEMO_TEMP}
+mkdir -p ${DEMO_TEMP}
+cp -R files/${DEMO_NAME}/* ${DEMO_TEMP}
+cd ${DEMO_TEMP}
+
+if [ ! -d ${DEMO_TEMP}/src-app1 ]; then git clone git@github.com:ciberkleid/hello-go.git ${DEMO_TEMP}/src-app1; fi
+if [ ! -d ${DEMO_TEMP}/src-app2 ]; then git clone git@github.com:ciberkleid/hello-go.git ${DEMO_TEMP}/src-app2; rm ${DEMO_TEMP}/src-app2/Dockerfile; fi
+
+echo "Setting DOCKER_USERNAME and DOCKER_PASSWORD..."
+# op item get "DockerHubEnterprise" --format json
+if [ -z $DOCKER_PASSWORD ]; then export DOCKER_USERNAME=$(op read op://Work/DockerHubEnterprise/Section_iwtibsn7dbihotun2tcxcikewy/username); export DOCKER_PASSWORD=$(op read op://Work/DockerHubEnterprise/Section_iwtibsn7dbihotun2tcxcikewy/access-token); fi
+echo "DOCKER_USERNAME=${DOCKER_USERNAME}"
+
+#echo "Setting DOCKER_USERNAME and DOCKER_PASSWORD..."
+# op item get "DockerHubPersonal" --format json
+#if [ -z $DOCKER_PASSWORD ]; then export DOCKER_USERNAME=$(op read op://Work/DockerHubPersonal/username); export DOCKER_PASSWORD=$(op read op://Work/DockerHubPersonal/Section_37cgzxjgymy5hhhcyxr2d7k3gm/access-token); fi
+#echo "DOCKER_USERNAME=${DOCKER_USERNAME}"
+
+pack config pull-policy if-not-present
+docker pull paketobuildpacks/builder:tiny
+docker pull paketobuildpacks/run:tiny-cnb
+
+kubectl delete ns kbld-demo
+kubectl create ns kbld-demo
+
+clear
+#_ECHO_ON
+#which kbld
+#open https://carvel.dev
+kbld --version
+#kbld --help
+#clear
+
+tree
+kbld -f k8s-config.yaml --unresolved-inspect
+#kbld inspect -f k8s-config.yaml
+
+#_ECHO_# To Do: (1) Build app1 & app2; (2) Resolve tag for nginx
+kbld -f k8s-config.yaml -f kbld-config.yaml --platform linux/arm64/v8 --lock-output kbld.lock.yaml > kbld.stdout.yaml
+
+# ECHO_# What happened?
+docker images | grep kbld
+open https://hub.docker.com/repositories/$DOCKER_USERNAME
+ls -ltr
+bat kbld.lock.yaml
+kbld -f k8s-config.yaml --unresolved-inspect
+kbld -f kbld.stdout.yaml  --unresolved-inspect
+bat kbld.stdout.yaml -P
+
+#clear
+#_ECHO_# For subsequent cycles, we can use the lock file as input
+kbld -f k8s-config.yaml -f kbld.lock.yaml
+#kbld -f k8s-config.yaml -f kbld-config.yaml --lock-output kbld.lock.yaml --build=false
+
+#clear
+#_ECHO_# Integrate it into your workflow! (YAML in / YAML out)
+kustomize build | kbld -f - -f kbld.lock.yaml | kubectl apply -f -
+
+#_ECHO_# Recap: Parallel builds, image "receipts" (aka lock files), lock-in guarantee, easy interoperability
+#_ECHO_# Questions?
