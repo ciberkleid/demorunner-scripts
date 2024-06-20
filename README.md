@@ -5,7 +5,7 @@
 
 1. Install demorunner utility:
 ```shell
-git clone https://github.com/mgbrodi/demorunner
+git clone https://github.com/cgcollab/demorunner
 ```
 
 2. (Optional) Put `demorunner.sh` in your $PATH.
@@ -24,3 +24,12 @@ demorunner.sh cnb-pack
 > Note: Depending on the commands in each demo script, additional dependencies may be required.
 > Most can probably be installed with a package manager such as Homebrew.
 
+### Caveats from the author:
+
+The scripts found in this repo incorporate some personal configurations that you may need to update.
+For example:
+- I have renamed `demorunner.sh` to `demorunner`
+- I use `1Password` to manage passwords and some scripts use the `op` CLI to obtain passwords needed
+- Some values are hardcoded, such as my GitHub org name
+
+You may need to update corresponding entries in the scripts to accommodate your own preferences.
