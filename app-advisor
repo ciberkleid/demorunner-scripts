@@ -1,0 +1,120 @@
+#_ECHO_OFF
+
+# TO RUN:
+# cd $DEMO_HOME; demorunner app-advisor 1
+
+export DEMO_NAME="app-advisor"
+
+echo "DEMO_NAME=${DEMO_NAME}"
+# Set DEMO_HOME in your shell profile script (e.g. add "export DEMO_HOME=~/workspace/demorunner-scripts" to ~/.zprofile or ~/.bash_profile)
+echo "DEMO_HOME=${DEMO_HOME}"
+export DEMO_TEMP="${DEMO_HOME}/tmp/${DEMO_NAME}"
+echo "DEMO_TEMP=${DEMO_TEMP}"
+tabset --title ${DEMO_NAME}
+rm -rf ${DEMO_TEMP}
+mkdir -p ${DEMO_TEMP}
+cp -R files/${DEMO_NAME}/* ${DEMO_TEMP}
+cd ${DEMO_TEMP}
+
+DEMO_DELAY=0
+
+echo "Setting GIT_TOKEN_FOR_PRS..."
+if [ -z $GIT_TOKEN_FOR_PRS ]; then export GIT_TOKEN_FOR_PRS=$(op read op://Work/GitHub/access-token-app-advisor); fi
+
+if ! command -v advisor &> /dev/null; then echo "ERROR: advisor could not be found — run: \"demorunner app-advisor-SETUP\"" && exit 1; fi
+
+sdk use java 21.0.3-graal
+
+if [[ $(jps | grep application-advisor-server | cut -d " " -f1) != "" ]]; then echo "App Advisor is running - will stop and restart" && kill -9 $(jps | grep application-advisor-server | cut -d " " -f1); fi
+nohup java -jar ~/jar/application-advisor-server.jar > advisor-server.log 2>&1 &
+echo "Started Application Advisor Server"
+
+rm -rf app-advisor-demo
+gh repo delete ciberkleid/app-advisor-demo --yes
+# Use Neven's repo:
+gh repo fork nevenc/familycashcard-spring-application-advisor-demo --fork-name app-advisor-demo --default-branch-only --clone -- --depth=1
+
+# Try with App Advisor demo version of petclinic
+# Notes: This repo does not allow forks and it generates a plan with only one step so actually not a good fit for this script
+#gh repo clone pivotal-cf/spring-petclinic && cd spring-petclinic && git checkout 2.7.3-demo
+#gh repo create ciberkleid/app-advisor-demo --private
+#git remote set-url origin git@github.com:ciberkleid/app-advisor-demo.git
+#git push -u origin main
+#cd ..
+#rm -rf spring-petclinic
+#gh repo clone ciberkleid/app-advisor-demo
+
+cd app-advisor-demo
+export ADVISOR_SERVER=http://localhost:8080
+clear
+#_ECHO_ON
+#_ECHO_# Spring Application Advisor: CLI + Server + UI
+advisor --help
+echo $ADVISOR_SERVER
+http -b $ADVISOR_SERVER/advisor/actuator/info
+
+clear
+#_ECHO_# Step 1: Evaluate your app dependencies (libs & tools)
+ls
+head -n 21 pom.xml
+advisor build-config get
+#_ECHO_# This produces a CycloneDX SBOM file...
+cat target/.advisor/build-config.json | jq 'keys'
+cat target/.advisor/build-config.json | jq '.tools'
+cat target/.advisor/build-config.json | jq '.sbom'
+
+clear
+#_ECHO_# Optional: upload to UI (evaluates Spring/micrometer & transitive dependencies)
+advisor build-config publish
+open http://localhost:5173
+
+clear
+#_ECHO_# Step 2: Use the file to generate an upgrade plan
+advisor upgrade-plan get
+
+#_ECHO_# Step 3: Apply the first step in the plan (manual commit/push example)
+advisor upgrade-plan apply
+git diff
+git commit -am "Spring App Advisor demo - iteration 1" && git push
+
+clear
+#_ECHO_# Step 4: Rinse & Repeat! First, regenerate the upgrade plan
+advisor build-config get && advisor upgrade-plan get
+#_ECHO_#  Then, apply the next step, this time with an automatic Pull Request!
+advisor upgrade-plan apply --push --token=$GIT_TOKEN_FOR_PRS
+
+#_ECHO_# Merge the PR!
+
+########## MANUALLY:
+########## Click on the link to the PR in the output above
+########## Merge the PR and delete the branch
+
+git restore . && git pull
+#_ECHO_# Then repeat! (third out of four cycles...)
+advisor build-config get && advisor upgrade-plan apply
+git commit -am "Spring App Advisor demo - iteration 3" & git push
+
+#_ECHO_# How are we doing? Let's check using the UI
+advisor build-config get && advisor build-config publish
+open http://localhost:5173
+
+##_ECHO_# And finally, the last step!
+#advisor build-config get && advisor upgrade-plan apply
+#git commit -am "Spring App Advisor demo - iteration 4" & git push
+##_ECHO_# Check out the final result
+#advisor build-config get && advisor upgrade-plan get
+#advisor build-config publish && open http://localhost:5173
+
+clear
+#_ECHO_# App Advisor in GitHub Actions
+#_ECHO_OFF
+open https://github.com/pivotal-cf/spring-petclinic/pull/3177/files
+open https://github.com/pivotal-cf/spring-petclinic/actions/runs/9562036835/job/26357557327
+open https://github.com/pivotal-cf/spring-petclinic/actions/runs/9562036835/workflow
+#_ECHO_ON
+
+#_ECHO_# Questions?
+
+#_ECHO_OFF
+kill -9 `jps | grep application-advisor-server | cut -d " " -f1`
+#_ECHO_ON
