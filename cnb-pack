@@ -1,6 +1,18 @@
 #_ECHO_OFF
 
+## WATCH THIS BEFORE DOING THIS AGAIN: https://www.youtube.com/watch?v=cenTw6WzQv8
+## REVIEW THIS BEFORE DOING THIS AGAIN: https://docs.google.com/presentation/d/1rVQQ8dv4IXAZCB3FLMZkl8escQUUpPozjXqsoQhqios/edit#slide=id.g2b40283e79b_0_20
+## AND THIS: https://vmware.slack.com/archives/D06LEGKEA3V/p1714052731881599
+## GOT QUESTION ABOUT MONOREPO
+## ALSO: ARM64 https://github.com/paketo-buildpacks/java/discussions/1387#discussioncomment-9168372
+## AND https://medium.com/ekino-france/native-image-with-spring-boot-70f32788528c
+
+# TO RUN:
+# cd $DEMO_HOME; demorunner cnb-pack 1
+
 export DEMO_NAME="cnb-pack"
+
+export DEMO_DELAY=0
 
 echo "DEMO_NAME=${DEMO_NAME}"
 # Set DEMO_HOME in your shell profile script (e.g. add "export DEMO_HOME=~/workspace/demorunner-scripts" to ~/.zprofile or ~/.bash_profile)
@@ -10,68 +22,102 @@ echo "DEMO_TEMP=${DEMO_TEMP}"
 tabset --title ${DEMO_NAME}
 rm -rf ${DEMO_TEMP}
 mkdir -p ${DEMO_TEMP}
+cp -R files/${DEMO_NAME}/* ${DEMO_TEMP}
 cd ${DEMO_TEMP}
+
+# Workaround (could problem be caused by Testcontainers app??)
+export DOCKER_HOST=unix:///Users/ciberkleid/.docker/run/docker.sock
 
 if [ ! -d hello-go-app ]; then git clone https://github.com/ciberkleid/hello-go.git hello-go-app; fi
 if [ ! -d hello-java-app ]; then git clone https://github.com/ciberkleid/hello-java.git hello-java-app; fi
 if [ ! -d buildpack-samples ]; then git clone https://github.com/buildpacks/samples.git buildpack-samples; fi
 
-pack config default-builder paketobuildpacks/builder:base
+# TEMP FIX - try and see when not necessary anymore
+#sed -i '' 's/api = "0.10"/api = "0.9"/' samples/buildpacks/hello-world/buildpack.toml
+
+pack config default-builder paketobuildpacks/builder-jammy-tiny
 pack config pull-policy if-not-present
 
-docker pull paketobuildpacks/builder:base
-docker pull paketobuildpacks/run:base-cnb
+docker logout
+docker pull paketobuildpacks/builder-jammy-tiny
+docker pull paketobuildpacks/run-jammy-tiny
 
 export BAT_THEME=OneHalfDark
 
 cd hello-java-app
 pack build hello-java-img
-#./mvnw dependency:go-offline
+./mvnw dependency:go-offline
 
 clear
 #_ECHO_ON
 
-#_ECHO_# Buildpacks 101
+##_ECHO_# Buildpacks 101
 
-#_ECHO_# Dockerfile: docker build . -t my-img -f Dockerfile
-bat Dockerfile
+##_ECHO_# Dockerfile: docker build . -t my-img -f Dockerfile
+#bat ../Dockerfile
+#bat Dockerfile
 
-#_ECHO_# Buildpacks (platform + base images + lifecycle + buildpacks)
+##_ECHO_# Buildpacks (platform + base images + lifecycle + buildpacks)
 
-pack build hello-java-img --builder paketobuildpacks/builder:base
+#pack build hello-java-img --builder paketobuildpacks/builder-jammy-tiny
+pack build hello-java-img
 
-docker images | grep -E "(hello|paketo)"
+docker images | grep -E "(hello|buildpacks)"
 
 clear
-#_ECHO_# Transparency (SBOM, inspections, layers)
+##_ECHO_# Transparency (SBOM, inspections, layers)
 
 #_ECHO_# Software Bill of Materials
 pack sbom download hello-java-img; tree layers
 cat layers/sbom/launch/paketo-buildpacks_bellsoft-liberica/jre/sbom.syft.json | jq
 cat layers/sbom/launch/paketo-buildpacks_executable-jar/sbom.syft.json | jq
+#_ECHO_OFF
+rm -rf layers
+#_ECHO_ON
 
 ##_ECHO_# Image and Builder Inspection
 #_ECHO_# Image Inspection
 pack inspect hello-java-img
-#pack inspect-builder
+#pack builder inspect
+#pack buildpack inspect paketo-buildpacks/java
 
 #_ECHO_# Image Layers
 dive hello-java-img
+# Workaround to error: https://github.com/wagoodman/dive/issues/360#issuecomment-1727278281
+#docker save hello-java-img > hello-java-img.tar
+#dive hello-java-img.tar --source=docker-archive  ## Usually just: dive hello-java-img
 
 clear
 #_ECHO_# OS Patching
-docker pull paketobuildpacks/run:1.2.17-base-cnb
-docker tag paketobuildpacks/run:1.2.17-base-cnb paketobuildpacks/run:base-cnb
+docker pull paketobuildpacks/run-jammy-tiny:0.2.25
+docker tag paketobuildpacks/run-jammy-tiny:0.2.25 paketobuildpacks/run-jammy-tiny
 #docker images | grep -E "(hello|paketo)"
 pack rebase hello-java-img
 
-#clear
-##_ECHO_# Custom Buildpacks
-#ls ../buildpack-samples/buildpacks/hello-world/bin
-#pack build hello-java-img --buildpack from=builder --buildpack ../buildpack-samples/buildpacks/hello-world
+clear
+#_ECHO_# Custom Buildpacks
+ls ../buildpack-samples/buildpacks/hello-world/bin
+pack build hello-java-img --buildpack from=builder --buildpack ../buildpack-samples/buildpacks/hello-world
+
+clear
+###_ECHO_# Spring Boot  (For default options, run: ./mvnw spring-boot:build-image)
+#_ECHO_# Spring Boot
+./mvnw spring-boot:build-image -DskipTests -Dspring-boot.build-image.builder=paketobuildpacks/builder-jammy-tiny
+
+## Spring Boot alternate flow
+##_ECHO_# Spring Boot
+##_ECHO_OFF
+## Re-tag builder/run images to avoid downloading new ones
+#docker tag paketobuildpacks/builder-jammy-tiny docker.io/paketobuildpacks/builder-jammy-base
+#docker tag paketobuildpacks/run-jammy-tiny docker.io/paketobuildpacks/run-jammy-base
+##_ECHO_ON
+#./mvnw spring-boot:build-image -DskipTests
 
 #clear
-##_ECHO_# Spring Boot
-##_ECHO_#./mvnw spring-boot:build-image -DskipTests
+##_ECHO_# What about Jib?
+#bat ../Dockerfile-Jib -l dockerfile
+#open https://github.com/GoogleContainerTools/jib/blob/master/examples/java-agent/pom.xml
 
 #_ECHO_# Questions?
+#_ECHO_#
+#_ECHO_#
