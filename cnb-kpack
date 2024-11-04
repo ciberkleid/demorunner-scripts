@@ -19,7 +19,7 @@ cd ${DEMO_TEMP}
 
 echo "Setting DOCKER_USERNAME and DOCKER_PASSWORD..."
 # op item get "DockerHubEnterprise" --format json
-if [ -z $DOCKER_PASSWORD ]; then export DOCKER_USERNAME=$(op read op://Work/DockerHubEnterprise/Section_iwtibsn7dbihotun2tcxcikewy/username); export DOCKER_PASSWORD=$(op read op://Work/DockerHubEnterprise/Section_iwtibsn7dbihotun2tcxcikewy/access-token); fi
+if [ -z $DOCKER_PASSWORD ]; then export DOCKER_USERNAME=$(op read op://Work/DockerHubEnterprise/user); export DOCKER_PASSWORD=$(op read op://Work/DockerHubEnterprise/access-token); fi
 
 # Disable fzf interactive for kubectx and kubens (alternatively, can use: "kubectx | cat")
 export KUBECTX_IGNORE_FZF=1
@@ -35,12 +35,12 @@ kubectl -n kpack delete cm kp-config
 
 # Cleanup
 kubectl delete ns kpack-builds
-kubectl delete -f https://github.com/buildpacks-community/kpack/releases/download/v0.13.2/release-0.13.2.yaml
+kubectl delete -f https://github.com/buildpacks-community/kpack/releases/download/v0.15.0/release-0.15.0.yaml
 
 
 # Install kpack
 echo "Installing kpack"
-kubectl apply -f https://github.com/buildpacks-community/kpack/releases/download/v0.13.2/release-0.13.2.yaml
+kubectl apply -f https://github.com/buildpacks-community/kpack/releases/download/v0.15.0/release-0.15.0.yaml
 kubectl create ns kpack-builds
 kubens kpack-builds
 
@@ -90,7 +90,7 @@ clear
 #_ECHO_# Rebase on OS change
 kp image list
 kp build list
-kp clusterstack save base --build-image paketobuildpacks/build-jammy-base:0.1.102 --run-image paketobuildpacks/run-jammy-base:0.1.102
+kp clusterstack save base --build-image paketobuildpacks/build-jammy-base:0.1.128 --run-image paketobuildpacks/run-jammy-base:0.1.128
 kp build list
 kp build logs inventory-app
 

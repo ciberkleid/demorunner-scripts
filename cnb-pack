@@ -1,12 +1,5 @@
 #_ECHO_OFF
 
-## WATCH THIS BEFORE DOING THIS AGAIN: https://www.youtube.com/watch?v=cenTw6WzQv8
-## REVIEW THIS BEFORE DOING THIS AGAIN: https://docs.google.com/presentation/d/1rVQQ8dv4IXAZCB3FLMZkl8escQUUpPozjXqsoQhqios/edit#slide=id.g2b40283e79b_0_20
-## AND THIS: https://vmware.slack.com/archives/D06LEGKEA3V/p1714052731881599
-## GOT QUESTION ABOUT MONOREPO
-## ALSO: ARM64 https://github.com/paketo-buildpacks/java/discussions/1387#discussioncomment-9168372
-## AND https://medium.com/ekino-france/native-image-with-spring-boot-70f32788528c
-
 # TO RUN:
 # cd $DEMO_HOME; demorunner cnb-pack 1
 
@@ -62,7 +55,7 @@ clear
 #pack build hello-java-img --builder paketobuildpacks/builder-jammy-tiny
 pack build hello-java-img
 
-docker images | grep -E "(hello|buildpacks)"
+docker images | grep -E "(hello|tiny)"
 
 clear
 ##_ECHO_# Transparency (SBOM, inspections, layers)

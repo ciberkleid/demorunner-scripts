@@ -1,0 +1,66 @@
+#_ECHO_OFF
+
+# TO RUN:
+# cd $DEMO_HOME; demorunner cnb-pack-native 1
+
+export DEMO_NAME="cnb-pack-native"
+
+export DEMO_DELAY=0
+
+echo "DEMO_NAME=${DEMO_NAME}"
+# Set DEMO_HOME in your shell profile script (e.g. add "export DEMO_HOME=~/workspace/demorunner-scripts" to ~/.zprofile or ~/.bash_profile)
+echo "DEMO_HOME=${DEMO_HOME}"
+export DEMO_TEMP="${DEMO_HOME}/tmp/${DEMO_NAME}"
+echo "DEMO_TEMP=${DEMO_TEMP}"
+tabset --title ${DEMO_NAME}
+rm -rf ${DEMO_TEMP}
+mkdir -p ${DEMO_TEMP}
+cp -R files/${DEMO_NAME}/* ${DEMO_TEMP}
+cd ${DEMO_TEMP}
+
+# Workaround (could problem be caused by Testcontainers app??)
+export DOCKER_HOST=unix:///Users/ciberkleid/.docker/run/docker.sock
+
+if [ ! -d app-samples ]; then git clone https://github.com/paketo-buildpacks/samples.git app-samples; fi
+ln -s app-samples/java/native-image/public-static-main-native-image-maven native-java-app
+ln -s app-samples/java/native-image/spring-boot-native-image-maven native-boot-app
+
+pack config default-builder paketobuildpacks/builder-jammy-tiny
+pack config pull-policy if-not-present
+
+docker logout
+
+export BAT_THEME=OneHalfDark
+
+cd native-boot-app
+# Delete the specified lines from pom.xml
+sed -i '' -e '45,48d' -e '51,58d' pom.xml
+./mvnw spring-boot:build-image -Dspring-boot.build-image.imageName=demo-regular:latest
+git restore pom.xml
+
+clear
+#_ECHO_ON
+
+##_ECHO_# Native images
+#cd ../native-java-app
+## See https://github.com/paketo-buildpacks/java/discussions/1387#discussioncomment-9168372
+## paketobuildpacks/builder-jammy-buildpackless-tiny # Dual-arch builder for ARM64
+#pack build hello-java-native -B paketobuildpacks/builder-jammy-buildpackless-tiny -b gcr.io/paketo-buildpacks/java:beta
+
+#_ECHO_# Native images with Spring Boot
+#_ECHO_# Required plugin: org.graalvm.buildtools...
+bat pom.xml
+#_ECHO_# Spring Boot provided native profile
+./mvnw spring-boot:build-image -Pnative -Dspring-boot.build-image.imageName=demo-native:latest
+
+docker images | grep demo
+docker run demo-regular
+docker run demo-native
+
+
+#./mvnw spring-boot:build-image -Pnative  ## Not on ARM64 (still?)
+#./mvnw spring-boot:build-image -Dspring-boot.build-image.builder=paketobuildpacks/builder-jammy-buildpackless-tiny -Dspring-boot.build-image.buildpack=paketobuildpacks/java:beta
+
+#_ECHO_# Questions?
+#_ECHO_#
+#_ECHO_# 
